@@ -49,6 +49,10 @@ dzr /track/1043317462
 # use a custom PLAYER (mpg123 v1.31+ is a lightweight alternative)
 PLAYER="mpg123 -" dzr
 
+# select audio quality (default MP3_128, other values: MP3_64, MP3_320, FLAC)
+# MP3_320/FLAC require the matching deezer subscription
+DZR_FMT=FLAC dzr
+
 # inject deezer ID3v2 into MP3 (require eyeD3) and rename it as $ARTIST - $TITLE.mp3
 dzr-id3 https://deezer.com/track/1043317462 tagme.mp3
 
