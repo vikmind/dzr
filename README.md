@@ -9,6 +9,7 @@
 - Real-time Lyrics display
 - Web interface support (see [dzr](https://github.com/topics/dzr)-tagged frontend)
 - ID3v2 tag injector from Deezer metadata (cover, artist, ...)
+- Last.fm scrobbling (opt-in, using your own API account)
 - Play without storing/caching on your machine for [legal reasons](https://github.com/github/dmca/blob/master/2021/02/2021-02-10-deezer.md)
 - No private deezer key in the source (auto-extracted from web player, also for legal reasons)
 - VSCode extension [VSIX](https://github.com/yne/dzr/releases) experimental port
@@ -55,6 +56,12 @@ DZR_FMT=FLAC dzr
 
 # inject deezer ID3v2 into MP3 (require eyeD3) and rename it as $ARTIST - $TITLE.mp3
 dzr-id3 https://deezer.com/track/1043317462 tagme.mp3
+
+# enable last.fm scrobbling:
+# 1. create an API account on https://www.last.fm/api/account/create
+# 2. add DZR_LFM_KEY=<api key> and DZR_LFM_SECRET=<shared secret> to ~/.config/dzrrc
+# 3. link your account (writes DZR_LFM_SK to ~/.config/dzrrc)
+dzr-scrobble login
 
 # show track lyrics as srt
 dzr-srt https://deezer.com/track/14408104

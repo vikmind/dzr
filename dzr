@@ -7,7 +7,7 @@ FETCH=${FETCH:-curl -s} # FETCH="wget -q -O -" or FETCH="curl -s -k"
 PLAYER=${PLAYER:-'mpv -'} # PLAYER="ffplay -"
 DZR_SPONGE=${DZR_SPONGE:-cat -} # DZR_SPONGE="sponge" from package "moreutils"
 DZR_RC="${DZR_RC:-${XDG_CONFIG_HOME:-$HOME/.config}/dzrrc}"
-[ -f "$DZR_RC" ] && . "$DZR_RC" && export DZR_CBC DZR_ARL
+[ -f "$DZR_RC" ] && . "$DZR_RC" && export DZR_CBC DZR_ARL DZR_LFM_KEY DZR_LFM_SECRET DZR_LFM_SK
 if [ "$REQUEST_METHOD" = "HEAD" ] ; then
 	printf 'Access-Control-Allow-Origin: *\ndzr-api: 0\n\n'
 elif [ "$REQUEST_METHOD" = "GET" ] ; then
@@ -174,7 +174,11 @@ play() { # receive /track/1,2,3 from stdin
 			printf '%s %s # %s\n' "$SELF" "/track/$id" "$info" >&2
 			printf '\033]0;🎶 %s\007' "$(printf '%s' "$info" | sed 's/ \[.*//;s/ (.*)//')" >&2
 		fi
-		$FETCH "$url" | $DZR_SPONGE | $SELF-dec $id | eval ${PLAYER:-'mpv -'} || break # stop if Ctrl+C : $? = 4
+		[ -n "$DZR_LFM_SK" ] && $SELF-scrobble now "$id" >/dev/null 2>&1 &
+		start=$(date +%s)
+		$FETCH "$url" | $DZR_SPONGE | $SELF-dec $id | eval ${PLAYER:-'mpv -'}; rc=$?
+		[ -n "$DZR_LFM_SK" ] && $SELF-scrobble played "$id" "$start" "$(($(date +%s)-start))" >/dev/null 2>&1 &
+		[ $rc -ne 0 ] && break # stop if Ctrl+C : $? = 4
 	done
 }
 # tracks_json: call the gw fetcher for this context (raw JSON track list)

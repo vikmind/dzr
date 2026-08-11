@@ -1,0 +1,79 @@
+#!/bin/sh
+# Last.fm scrobbler, see: https://www.last.fm/api/scrobbling
+# USAGE Example:
+#   dzr-scrobble login                        # one-time account linking
+#   dzr-scrobble now 5404528                  # "now playing" notification
+#   dzr-scrobble played 5404528 1700000000 42 # scrobble if listened long enough
+
+FETCH=${FETCH:-curl -s} # FETCH="wget -q -O -" or FETCH="curl -s -k"
+DZR_RC="${DZR_RC:-${XDG_CONFIG_HOME:-$HOME/.config}/dzrrc}"
+[ -f "$DZR_RC" ] && . "$DZR_RC"
+LFM="https://ws.audioscrobbler.com/2.0/"
+die() { echo "$1" >&2; exit 1; }
+
+[ -z "$DZR_LFM_KEY" ] || [ -z "$DZR_LFM_SECRET" ] && die "$(cat <<EOF
+DZR_LFM_KEY/DZR_LFM_SECRET are required. To get them:
+- Create an API account on https://www.last.fm/api/account/create
+- Then add to $DZR_RC :
+    DZR_LFM_KEY=<your API key>
+    DZR_LFM_SECRET=<your shared secret>
+- Then run: dzr-scrobble login
+EOF
+)"
+
+# sign (md5 of the sorted "namevalue" pairs + secret) then POST (or GET if $LFM_GET=-G)
+lfm() { # $1=method, then any number of "key=value" ; prints the JSON reply
+	method=$1; shift
+	sig=$(printf '%s\n' "method=$method" "api_key=$DZR_LFM_KEY" "$@" | LC_ALL=C sort | sed 's/=//' | tr -d '\n')
+	sig=$(printf '%s%s' "$sig" "$DZR_LFM_SECRET" | openssl dgst -md5 | awk '{print $NF}')
+	set -- "$@" "method=$method" "api_key=$DZR_LFM_KEY" "api_sig=$sig" "format=json" # format is not signed
+	n=$#; while [ $n -gt 0 ]; do p=$1; shift; set -- "$@" --data-urlencode "$p"; n=$((n-1)); done
+	$FETCH $LFM_GET "$LFM" "$@"
+}
+lfm_err() { printf '%s' "$1" | jq -r 'if .error then "last.fm error \(.error): \(.message)" else empty end'; }
+
+if [ "$1" = "login" ]; then
+	LFM_GET=-G # auth.* methods are GET-only
+	TOKEN=$(lfm auth.getToken | jq -r '.token // empty')
+	[ -z "$TOKEN" ] && die "error: auth.getToken failed (check DZR_LFM_KEY/DZR_LFM_SECRET)"
+	echo "Open this URL, then click 'Yes, allow access':"
+	echo "  https://www.last.fm/api/auth/?api_key=$DZR_LFM_KEY&token=$TOKEN"
+	printf "then press Enter here: "
+	read _IGNORED
+	RES=$(lfm auth.getSession "token=$TOKEN")
+	SK=$(printf '%s' "$RES" | jq -r '.session.key // empty')
+	[ -z "$SK" ] && die "error: auth.getSession failed: $(lfm_err "$RES")"
+	mkdir -p "$(dirname "$DZR_RC")"
+	{ grep -v '^DZR_LFM_SK=' "$DZR_RC" 2>/dev/null; echo "DZR_LFM_SK=$SK"; } > "$DZR_RC.tmp" && mv "$DZR_RC.tmp" "$DZR_RC"
+	printf "DZR_LFM_SK saved to %s (scrobbling %s)\n" "$DZR_RC" "$(printf '%s' "$RES" | jq -r .session.name)" >&2
+	exit 0
+fi
+
+SNG_ID=$(echo "$2" | tr -dc '0-9') # extract id from path,url,...
+[ "$1" != "now" ] && [ "$1" != "played" ] && die "USAGE: dzr-scrobble login|now <id>|played <id> <start> <elapsed>"
+[ -z "$SNG_ID" ] && die "USAGE: dzr-scrobble $1 5404528"
+[ -z "$DZR_LFM_SK" ] && die "no DZR_LFM_SK, run: dzr-scrobble login"
+
+# reuse session from parent dzr process, or create a new one
+gw() { $FETCH "https://www.deezer.com/ajax/gw-light.php?method=$1&input=3&api_version=1.0&api_token=$DZR_API_TOK" --header "Cookie: sid=$DZR_SID; arl=$DZR_ARL" -d "$2"; }
+if [ -z "$DZR_SID" ] || [ -z "$DZR_API_TOK" ]; then
+	DZR_SID=$($FETCH "www.deezer.com/ajax/gw-light.php?method=deezer.ping&api_version=1.0&api_token" | jq -r .results.SESSION)
+	DZR_API_TOK=
+	DZR_API_TOK=$(gw deezer.getUserData '{}' | jq -r .results.checkForm)
+fi
+SNG_NFO=$(gw song.getListData "{\"sng_ids\":[$SNG_ID]}" | jq -r '.results.data[0] // empty')
+[ -z "$SNG_NFO" ] && die "error: song.getListData returned no data for $SNG_ID"
+ART_NAME=$(printf '%s' "$SNG_NFO" | jq -r .ART_NAME)
+SNG_TITLE=$(printf '%s' "$SNG_NFO" | jq -r .SNG_TITLE)
+ALB_TITLE=$(printf '%s' "$SNG_NFO" | jq -r .ALB_TITLE)
+DURATION=$(printf '%s' "$SNG_NFO" | jq -r .DURATION)
+
+if [ "$1" = "now" ]; then
+	lfm_err "$(lfm track.updateNowPlaying "artist=$ART_NAME" "track=$SNG_TITLE" "album=$ALB_TITLE" "duration=$DURATION" "sk=$DZR_LFM_SK")" >&2
+	exit 0
+fi
+# a track is only scrobbled if it lasts >30s and was played for half its length (or 4min)
+START=${3:-0}; ELAPSED=${4:-0}
+[ "$DURATION" -le 30 ] && exit 0
+[ "$ELAPSED" -lt 240 ] && [ "$ELAPSED" -lt $((DURATION / 2)) ] && exit 0
+lfm_err "$(lfm track.scrobble "artist=$ART_NAME" "track=$SNG_TITLE" "album=$ALB_TITLE" "duration=$DURATION" "timestamp=$START" "sk=$DZR_LFM_SK")" >&2
