@@ -133,13 +133,13 @@ dzr() {
 		/radio 'list radios'
 }
 
-dzr_flow()             { gw_flow | jq "$GW_FMT_LIST" | xargs $DLG_LIST ∞ "continuous flow" ▸ "play all" ⇄ "shuffle" ;}
-dzr_loved()            { gw_loved | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" ;}
+dzr_flow()             { gw_flow | jq "$GW_FMT_LIST" | xargs $DLG_LIST ∞ "continuous flow" ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
+dzr_loved()            { gw_loved | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
 dzr_playlists()        { gw_playlists | jq "$FMT_MY_PLAYLIST" | xargs $DLG_LIST ;}
 dzr_artists()          { gw_artists | jq "$FMT_MY_ARTIST" | xargs $DLG_LIST ;}
 dzr_albums()           { gw_albums | jq "$FMT_MY_ALBUM" | xargs $DLG_LIST ;}
 # search
-dzr_search_track()     { gw_search_track "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" ;}
+dzr_search_track()     { gw_search_track "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
 dzr_search_artist()    { gw_search_artist "$1" | jq "$FMT_ARTIST" | xargs $DLG_LIST ;}
 dzr_search_album()     { gw_search_album "$1" | jq "$FMT_ALBUM" | xargs $DLG_LIST ;}
 dzr_search_playlist()  { gw_search_playlist "$1" | jq "$FMT_PLAYLIST" | xargs $DLG_LIST ;}
@@ -151,17 +151,17 @@ dzr_genre_0_radios()   { $FETCH "$API/genre/$(_id "$1")/radios" | jq "$PUB_FMT_R
 dzr_genre_0_artists()  { $FETCH "$API/genre/$(_id "$1")/artists" | jq '(.data[]|("/artist/"+(.id|tostring), (.name|gsub("\\x22";""))))' | xargs $DLG_LIST ;}
 # radio
 dzr_radio()            { $FETCH "$API/radio" | jq "$PUB_FMT_RADIO" | xargs $DLG_LIST ;} # public API - no gw-light equivalent
-dzr_radio_0()          { gw_radio "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" ;}
+dzr_radio_0()          { gw_radio "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
 # artist
 dzr_artist_0()         { $DLG_LIST top 'top tracks' albums '' related '' radio '' ;}
-dzr_artist_0_top()     { gw_artist_top "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" ;}
+dzr_artist_0_top()     { gw_artist_top "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
 dzr_artist_0_albums()  { gw_artist_albums "$1" | jq "$FMT_DISCOG" | xargs $DLG_LIST ;}
 dzr_artist_0_related() { gw_artist_related "$1" | jq "$FMT_ARTIST" | xargs $DLG_LIST ;}
-dzr_artist_0_radio()   { gw_artist_radio "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" ;}
+dzr_artist_0_radio()   { gw_artist_radio "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
 # album
-dzr_album_0()          { gw_album "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" ;}
+dzr_album_0()          { gw_album "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
 # playlist
-dzr_playlist_0()       { gw_playlist "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" ;}
+dzr_playlist_0()       { gw_playlist "$1" | jq "$GW_FMT_LIST" | xargs $DLG_LIST ▸ "play all" ⇄ "shuffle" + "add to playlist" ;}
 
 
 play() { # receive /track/1,2,3 from stdin
@@ -177,8 +177,8 @@ play() { # receive /track/1,2,3 from stdin
 		$FETCH "$url" | $DZR_SPONGE | $SELF-dec $id | eval ${PLAYER:-'mpv -'} || break # stop if Ctrl+C : $? = 4
 	done
 }
-# play_all: call the gw fetcher for this context, extract track IDs, play
-play_all() { # $1=url $2=FUNC $3=order(cat|shuf)
+# tracks_json: call the gw fetcher for this context (raw JSON track list)
+tracks_json() { # $1=url $2=FUNC
 	case "$2" in
 	dzr_flow)           gw_flow ;;
 	dzr_loved)          gw_loved ;;
@@ -189,7 +189,25 @@ play_all() { # $1=url $2=FUNC $3=order(cat|shuf)
 	dzr_playlist_0)     gw_playlist "$1" ;;
 	dzr_radio_0)        gw_radio "$1" ;;
 	*) return 1 ;;
-	esac | jq "$GW_FMT_TRKS" | play "$3"
+	esac
+}
+play_all() { tracks_json "$1" "$2" | jq "$GW_FMT_TRKS" | play "$3" ;} # $1=url $2=FUNC $3=order(cat|shuf)
+# add_all: ask for a target playlist (or create one), then add every track of this context
+add_all() { # $1=url $2=FUNC
+	pick=$(gw_playlists | jq "$FMT_MY_PLAYLIST" | xargs $DLG_LIST + "new playlist") || return 0
+	if [ "$pick" = "+" ]; then
+		name=$($DLG_TEXT '') || return 0
+		[ -z "$name" ] && return 0
+		pl=$(gw playlist.create "$(jq -cn --arg t "$name" '{title:$t,status:0,description:"",songs:[]}')" | jq -r '.results // empty')
+	else
+		pl=$(_id "$pick")
+	fi
+	[ -z "$pl" ] && { echo "error: could not get target playlist" >&2; return 1; }
+	songs=$(tracks_json "$1" "$2" | jq -c '[.results.data[]|[.SNG_ID,0]]')
+	[ "$songs" = "[]" ] && { echo "error: no track to add" >&2; return 1; }
+	err=$(gw playlist.addSongs "$(jq -cn --arg p "$pl" --argjson s "$songs" '{playlist_id:$p,songs:$s,offset:-1}')" | jq -r '.error|if type=="object" then (to_entries|map(.value)|join(", ")) else "" end')
+	[ -n "$err" ] && { echo "error: $err" >&2; return 1; }
+	dialog --keep-tite --msgbox "$(printf '%s' "$songs" | jq 'length') track(s) added to playlist $pl" 0 0
 }
 for url in "$@"; do
 	case $url in
@@ -208,6 +226,7 @@ for url in "$@"; do
 		case "$path" in
 		▸) play_all "$url" "$FUNC" cat; break ;;
 		⇄) play_all "$url" "$FUNC" shuf; break ;;
+		+) add_all "$url" "$FUNC"; break ;;
 		∞) while true; do gw_flow | jq "$GW_FMT_TRKS" | play cat || break; done; break ;;
 		/*) $SELF "$path";;
 		*)  $SELF "$url/$path";;
