@@ -36,8 +36,9 @@ if [ "$1" = "login" ]; then
 	LFM_GET=-G # auth.* methods are GET-only
 	TOKEN=$(lfm auth.getToken | jq -r '.token // empty')
 	[ -z "$TOKEN" ] && die "error: auth.getToken failed (check DZR_LFM_KEY/DZR_LFM_SECRET)"
-	echo "Open this URL, then click 'Yes, allow access':"
-	echo "  https://www.last.fm/api/auth/?api_key=$DZR_LFM_KEY&token=$TOKEN"
+	echo "Sign in to https://www.last.fm/ FIRST (the token is lost across the login redirect),"
+	echo "then open this URL and click 'Yes, allow access':"
+	echo "https://www.last.fm/api/auth/?api_key=$DZR_LFM_KEY&token=$TOKEN"
 	printf "then press Enter here: "
 	read _IGNORED
 	RES=$(lfm auth.getSession "token=$TOKEN")
